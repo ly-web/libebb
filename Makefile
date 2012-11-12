@@ -76,21 +76,15 @@ ifeq ($(CPU), powerpc)
 endif
 
 CFLAGS += -fPIC $(CPPFLAGS)
-DEPS = ebb.h ebb_request_parser.h rbtree.h
+DEPS = ebb.h ebb_request_parser.h
 LIBS = 
 
-GNUTLS_EXISTS = $(shell pkg-config --silence-errors --exists gnutls || echo "no")
-ifeq ($(GNUTLS_EXISTS),no)
-	USING_GNUTLS = "no"
-else
-	CFLAGS += $(shell pkg-config --cflags gnutls) -DHAVE_GNUTLS=1
-	LIBS += $(shell pkg-config --libs gnutls)
-	USING_GNUTLS = "yes"
-endif
+USING_GNUTLS = "no"
+
 CFLAGS += -I$(LIBEVDIR)/include
 LIBS += -L$(LIBEVDIR)/lib -lev
 
-SOURCES=ebb.c ebb_request_parser.c rbtree.c
+SOURCES=ebb.c ebb_request_parser.c
 OBJS=$(SOURCES:.c=.o)
 
 %.o: %.c
@@ -122,19 +116,15 @@ ebb_request_parser.c: ebb_request_parser.rl
 	ragel -s -G2 $< -o $@
 
 clean:
-	rm -f *.o *.lo *.la *.so *.dylib *.a test_rbtree test_request_parser examples/hello_world
+	rm -f *.o *.lo *.la *.so *.dylib *.a test_request_parser examples/hello_world
 
 clobber: clean
 	rm -f ebb_request_parser.c
 
 .PHONY: clean clobber
 
-test: test_request_parser test_rbtree
+test: test_request_parser
 	./test_request_parser
-	./test_rbtree
-
-test_rbtree: test_rbtree.o $(OUTPUT_A)
-	$(CC) -o $@ $< $(OUTPUT_A)
 
 test_request_parser: test_request_parser.o $(OUTPUT_A)
 	$(CC) -o $@ $< $(OUTPUT_A)
