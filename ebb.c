@@ -22,15 +22,7 @@
 #include "ebb.h"
 #include "ebb_request_parser.h"
 
-#ifndef TRUE
-# define TRUE 1
-#endif
-#ifndef FALSE
-# define FALSE 0
-#endif 
-#ifndef MIN
-# define MIN(a,b) (a < b ? a : b)
-#endif
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 #define error(FORMAT, ...) fprintf(stderr, "error: " FORMAT "\n", ##__VA_ARGS__)
 
@@ -45,9 +37,8 @@ set_nonblock (int fd)
 }
 
 static ssize_t 
-nosigpipe_push(void *data, const void *buf, size_t len)
+nosigpipe_push(int fd, const void *buf, size_t len)
 {
-  int fd = (int)data;
   int flags = 0;
 #ifdef MSG_NOSIGNAL
   flags = MSG_NOSIGNAL;
@@ -65,7 +56,7 @@ close_connection(ebb_connection *connection)
   if(0 > close(connection->fd))
     error("problem closing connection fd");
 
-  connection->open = FALSE;
+  connection->open = 0;
 
   if(connection->on_close)
     connection->on_close(connection);
@@ -74,12 +65,11 @@ close_connection(ebb_connection *connection)
    */
 }
 
-
 /* Internal callback 
  * called by connection->timeout_watcher
  */
 static void 
-on_timeout(struct ev_loop *loop, ev_timer *watcher, int revents)
+on_timeout(EV_P_ ev_timer *watcher, int revents)
 {
   ebb_connection *connection = watcher->data;
 
@@ -104,7 +94,7 @@ on_timeout(struct ev_loop *loop, ev_timer *watcher, int revents)
  * called by connection->read_watcher
  */
 static void 
-on_readable(struct ev_loop *loop, ev_io *watcher, int revents)
+on_readable(EV_P_ ev_io *watcher, int revents)
 {
   ebb_connection *connection = watcher->data;
   char base[TCP_MAXWIN];
@@ -156,7 +146,7 @@ error:
  * called by connection->write_watcher
  */
 static void 
-on_writable(struct ev_loop *loop, ev_io *watcher, int revents)
+on_writable(EV_P_ ev_io *watcher, int revents)
 {
   ebb_connection *connection = watcher->data;
   ssize_t sent;
@@ -169,7 +159,7 @@ on_writable(struct ev_loop *loop, ev_io *watcher, int revents)
   //assert(ev_is_active(&connection->timeout_watcher));
   assert(watcher == &connection->write_watcher);
 
-  sent = nosigpipe_push( (void*)connection->fd
+  sent = nosigpipe_push( connection->fd
                        , connection->to_write + connection->written
                        , connection->to_write_len - connection->written
                        );
@@ -181,7 +171,7 @@ on_writable(struct ev_loop *loop, ev_io *watcher, int revents)
   connection->written += sent;
 
   if(connection->written == connection->to_write_len) {
-    ev_io_stop(loop, watcher);
+    ev_io_stop(EV_A_ watcher);
     connection->to_write = NULL;
 
     if(connection->after_write_cb)
@@ -194,14 +184,13 @@ error:
 }
 
 static void 
-on_goodbye(struct ev_loop *loop, ev_timer *watcher, int revents)
+on_goodbye(EV_P_ ev_timer *watcher, int revents)
 {
   ebb_connection *connection = watcher->data;
   assert(watcher == &connection->goodbye_watcher);
 
   close_connection(connection);
 }
-
 
 static ebb_request* 
 new_request_wrapper(void *data)
@@ -216,19 +205,19 @@ new_request_wrapper(void *data)
  * Called by server->connection_watcher.
  */
 static void 
-on_connection(struct ev_loop *loop, ev_io *watcher, int revents)
+on_connection(EV_P_ ev_io *watcher, int revents)
 {
   ebb_server *server = watcher->data;
 
   //printf("on connection!\n");
 
   assert(server->listening);
-  assert(server->loop == loop);
+  assert(server->loop == EV_A);
   assert(&server->connection_watcher == watcher);
   
   if(EV_ERROR & revents) {
     error("on_connection() got error event, closing server.");
-    ebb_server_unlisten(server);
+    ebb_server_stop(server);
     return;
   }
 
@@ -254,7 +243,7 @@ on_connection(struct ev_loop *loop, ev_io *watcher, int revents)
   
   set_nonblock(fd);
   connection->fd = fd;
-  connection->open = TRUE;
+  connection->open = 1;
   connection->server = server;
   memcpy(&connection->sockaddr, &addr, addr_len);
   if(server->port[0] != '\0')
@@ -268,11 +257,10 @@ on_connection(struct ev_loop *loop, ev_io *watcher, int revents)
   /* Note: not starting the write watcher until there is data to be written */
   ev_io_set(&connection->write_watcher, connection->fd, EV_WRITE);
   ev_io_set(&connection->read_watcher, connection->fd, EV_READ);
-  /* XXX: seperate error watcher? */
 
-  ev_timer_start(loop, &connection->timeout_watcher);
+  ev_timer_start(EV_A_ &connection->timeout_watcher);
 
-  ev_io_start(loop, &connection->read_watcher);
+  ev_io_start(EV_A_ &connection->read_watcher);
 }
 
 /**
@@ -282,7 +270,7 @@ on_connection(struct ev_loop *loop, ev_io *watcher, int revents)
 int 
 ebb_server_listen_on_fd(ebb_server *server, const int fd)
 {
-  assert(server->listening == FALSE);
+  assert(server->listening == 0);
 
   if (listen(fd, EBB_MAX_CONNECTIONS) < 0) {
     perror("listen()");
@@ -292,14 +280,13 @@ ebb_server_listen_on_fd(ebb_server *server, const int fd)
   set_nonblock(fd); /* XXX superfluous? */
   
   server->fd = fd;
-  server->listening = TRUE;
+  server->listening = 1;
   
   ev_io_set (&server->connection_watcher, server->fd, EV_READ);
   ev_io_start (server->loop, &server->connection_watcher);
   
   return server->fd;
 }
-
 
 /**
  * Begin the server listening on a file descriptor This DOES NOT start the
@@ -357,13 +344,13 @@ error:
  * existing connections.
  */
 void 
-ebb_server_unlisten(ebb_server *server)
+ebb_server_stop(ebb_server *server)
 {
   if(server->listening) {
     ev_io_stop(server->loop, &server->connection_watcher);
     close(server->fd);
     server->port[0] = '\0';
-    server->listening = FALSE;
+    server->listening = 0;
   }
 }
 
@@ -380,17 +367,16 @@ void
 ebb_server_init(ebb_server *server, struct ev_loop *loop)
 {
   server->loop = loop;
-  server->listening = FALSE;
+  server->listening = 0;
   server->port[0] = '\0';
   server->fd = -1;
   server->connection_watcher.data = server;
   ev_init (&server->connection_watcher, on_connection);
-  server->secure = FALSE;
+  server->secure = 0;
 
   server->new_connection = NULL;
   server->data = NULL;
 }
-
 
 /**
  * Initialize an ebb_connection structure. After calling this function you
@@ -418,7 +404,7 @@ ebb_connection_init(ebb_connection *connection)
   connection->fd = -1;
   connection->server = NULL;
   connection->ip = NULL;
-  connection->open = FALSE;
+  connection->open = 0;
 
   ebb_request_parser_init( &connection->parser );
   connection->parser.data = connection;
@@ -467,18 +453,18 @@ ebb_connection_reset_timeout(ebb_connection *connection)
  *
  * This can only be called once at a time. If you call it again
  * while the connection is writing another buffer the ebb_connection_write
- * will return FALSE and ignore the request.
+ * will return 0 and ignore the request.
  */
 int 
 ebb_connection_write (ebb_connection *connection, const char *buf, size_t len, ebb_after_write_cb cb)
 {
   if(ev_is_active(&connection->write_watcher))
-    return FALSE;
+    return 0;
   assert(!CONNECTION_HAS_SOMETHING_TO_WRITE);
   connection->to_write = buf;
   connection->to_write_len = len;
   connection->written = 0;
   connection->after_write_cb = cb;
   ev_io_start(connection->server->loop, &connection->write_watcher);
-  return TRUE;
+  return 1;
 }

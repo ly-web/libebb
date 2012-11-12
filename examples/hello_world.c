@@ -83,14 +83,11 @@ ebb_connection* new_connection(ebb_server *server, struct sockaddr_in *addr)
 
 int main() 
 {
-  struct ev_loop *loop = ev_default_loop(0);
   ebb_server server;
-
-  ebb_server_init(&server, loop);
+  ebb_server_init(&server, EV_DEFAULT);
   //ebb_server_set_secure(&server, "examples/ca-cert.pem", "examples/ca-key.pem");
   server.new_connection = new_connection;
-
   printf("hello_world listening on port 5000\n");
   ebb_server_listen_on_port(&server, 5000);
-  ev_loop(loop, 0);
+  ev_run(EV_DEFAULT_ 0);
 }

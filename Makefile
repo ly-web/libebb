@@ -4,10 +4,7 @@
 # $(LIBEVDIR)/include has ev.h
 LIBEVDIR=$(HOME)/local/libev
 
-# Respect the environment
-ifeq ($(CC),)
-  CC=gcc
-endif
+CC=clang
 
 UNAME=$(shell uname)
 CPU=$(shell uname -p)
