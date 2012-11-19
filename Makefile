@@ -16,8 +16,6 @@ DEBUG = -g -ggdb3
 
 CFLAGS = -I. $(WARNINGS) $(DEBUG)
 
-
-
 COMP=$(CC)
 ifeq ($(UNAME),Darwin)
   LDOPT=-dynamiclib 
